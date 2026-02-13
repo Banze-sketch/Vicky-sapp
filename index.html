@@ -1,0 +1,620 @@
+<!doctype html>
+<!--
+README - AppleTree Demo (Single-File App)
+
+Demo steps:
+1) Open this file directly in a browser.
+2) Use the role selector at top-right to switch between Teacher, Parent, and Admin.
+3) Teacher flow:
+   - Select a learner, choose apple type, category, optional note, reflection prompt, and private flag.
+   - Submit apples. Growth apples are limited to max 2 per learner per day.
+   - Add Good apples to observe automatic cancellation of Growth apples (2 Good = 1 Growth cancelled).
+4) Parent flow:
+   - View child dashboard with weekly summary, apple history, and notifications.
+   - Add private comments on Growth apples.
+   - Use teacher↔parent message thread.
+5) Admin flow:
+   - Edit school value rules.
+   - Export CSV report.
+   - Reset demo data.
+6) Business rule behavior:
+   - Growth apples can be marked with improvement and are shown as expired after 14 days.
+   - Trend chart updates from stored records.
+
+Acceptance checklist:
+- [x] Single-file HTML with inline CSS and JS
+- [x] No frameworks/libraries/build tools
+- [x] Uses localStorage with seeded mock data (3 learners, 2 teachers, 1 admin)
+- [x] Role-based demo views (Teacher, Parent, Admin)
+- [x] Growth apple daily limit (max 2 / learner / day)
+- [x] Good apples cancel growth apples (2:1)
+- [x] Parent private comments on growth apples
+- [x] Admin rules management, CSV export, reset demo data
+- [x] In-app teacher↔parent messaging
+- [x] Notifications list
+- [x] Trend chart rendered via inline SVG
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AppleTree</title>
+  <style>
+    :root {
+      --bg: #fff;
+      --fg: #111;
+      --muted: #777;
+      --line: #ddd;
+      --good: #0a7f3f;
+      --growth: #ad2e24;
+      --card: #fafafa;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.4;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(255,255,255,.95);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+    }
+    h1 { font-size: 1.2rem; margin: 0; letter-spacing: .2px; }
+    .role-switch { display: flex; align-items: center; gap: 8px; }
+    select, input, textarea, button {
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--fg);
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #aaa; }
+    main {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(12, 1fr);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    .muted { color: var(--muted); font-size: .92rem; }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: .8rem;
+      padding: 2px 8px;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .good { border-color: var(--good); color: var(--good); }
+    .growth { border-color: var(--growth); color: var(--growth); }
+    .list { display: grid; gap: 8px; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #fff;
+    }
+    label { display: grid; gap: 4px; font-size: .9rem; }
+    .form-grid { display: grid; gap: 8px; }
+    .two { grid-template-columns: 1fr 1fr; }
+    .messages {
+      max-height: 260px;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+      padding-right: 4px;
+    }
+    .bubble {
+      border-radius: 12px;
+      padding: 8px 10px;
+      max-width: 85%;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .bubble.me { margin-left: auto; background: #111; color: #fff; }
+    .hidden { display: none; }
+    .inline { display: inline-flex; align-items: center; gap: 6px; }
+    .danger { border-color: #b00; color: #b00; }
+    .ok { border-color: #0a7f3f; color: #0a7f3f; }
+    svg { width: 100%; height: 180px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+    @media (max-width: 820px) {
+      .span-4, .span-6, .span-8, .span-12 { grid-column: span 12; }
+      header { flex-wrap: wrap; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🍎 AppleTree <span class="muted">single-file demo</span></h1>
+    <div class="role-switch">
+      <label class="inline" for="role"><span class="muted">Role</span>
+        <select id="role" aria-label="Role selector">
+          <option value="Teacher">Teacher</option>
+          <option value="Parent">Parent</option>
+          <option value="Admin">Admin</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <section class="card span-12" id="status"></section>
+
+    <section id="teacherView" class="grid">
+      <article class="card span-6">
+        <h2>Teacher • Award Apple</h2>
+        <form id="awardForm" class="form-grid">
+          <label>Learner
+            <select id="learnerSelect" required></select>
+          </label>
+          <div class="form-grid two">
+            <label>Type
+              <select id="appleType">
+                <option value="Good">Good Apple</option>
+                <option value="Growth">Growth Apple</option>
+              </select>
+            </label>
+            <label>Category
+              <select id="category"></select>
+            </label>
+          </div>
+          <label>Reflection Prompt
+            <input id="reflection" placeholder="What will you try next time?" />
+          </label>
+          <label>Note (optional)
+            <textarea id="note" rows="2" placeholder="Optional note"></textarea>
+          </label>
+          <label class="inline"><input type="checkbox" id="privateFlag" /> Private to family/staff</label>
+          <button type="submit">Save Apple</button>
+        </form>
+      </article>
+
+      <article class="card span-6">
+        <h2>Teacher ↔ Parent Messages</h2>
+        <div id="teacherMessages" class="messages" aria-live="polite"></div>
+        <form id="teacherMsgForm" class="form-grid" style="margin-top:8px;">
+          <label>New Message
+            <input id="teacherMsgInput" required placeholder="Write a brief update" />
+          </label>
+          <button type="submit">Send</button>
+        </form>
+      </article>
+
+      <article class="card span-12">
+        <h2>Recent Apples</h2>
+        <div id="teacherApples" class="list"></div>
+      </article>
+    </section>
+
+    <section id="parentView" class="grid hidden">
+      <article class="card span-4">
+        <h2>Parent Dashboard</h2>
+        <div id="weeklySummary"></div>
+      </article>
+      <article class="card span-8">
+        <h2>7-Day Trend</h2>
+        <div id="trendChart"></div>
+      </article>
+      <article class="card span-8">
+        <h2>My Child's Apples</h2>
+        <div id="parentApples" class="list"></div>
+      </article>
+      <article class="card span-4">
+        <h2>Notifications</h2>
+        <div id="notifications" class="list"></div>
+      </article>
+      <article class="card span-12">
+        <h2>Teacher ↔ Parent Messages</h2>
+        <div id="parentMessages" class="messages"></div>
+        <form id="parentMsgForm" class="form-grid" style="margin-top:8px;">
+          <label>New Message
+            <input id="parentMsgInput" required placeholder="Ask a question privately" />
+          </label>
+          <button type="submit">Send</button>
+        </form>
+      </article>
+    </section>
+
+    <section id="adminView" class="grid hidden">
+      <article class="card span-6">
+        <h2>Admin • School Values</h2>
+        <div id="valuesList" class="list"></div>
+        <form id="addValueForm" class="inline" style="margin-top:8px;">
+          <input id="newValue" required placeholder="Add value (e.g., Responsibility)" />
+          <button type="submit">Add</button>
+        </form>
+      </article>
+      <article class="card span-6">
+        <h2>Admin Actions</h2>
+        <div class="form-grid">
+          <button id="exportCsv" class="ok">Export CSV report</button>
+          <button id="resetDemo" class="danger">Reset demo data</button>
+        </div>
+        <p class="muted">Export includes learners, totals, active growth apples, and cancelled count.</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const KEY = 'appletree-demo-v1';
+
+    const seed = {
+      users: {
+        teachers: [
+          { id: 't1', name: 'Ms. Rivera' },
+          { id: 't2', name: 'Mr. Chen' }
+        ],
+        parents: [{ id: 'p1', name: 'Jordan Parent', learnerId: 'l1' }],
+        admin: { id: 'a1', name: 'Admin Lee' },
+        learners: [
+          { id: 'l1', name: 'Ava' },
+          { id: 'l2', name: 'Noah' },
+          { id: 'l3', name: 'Mia' }
+        ]
+      },
+      rules: { values: ['Respect', 'Kindness', 'Responsibility', 'Perseverance'] },
+      apples: [
+        { id: 'ap1', learnerId: 'l1', teacherId: 't1', type: 'Growth', category: 'Respect', note: 'Interrupted during group time', reflection: 'How can you show listening?', private: true, date: daysAgo(2), improvementRecorded: false, cancelled: false, parentComments: [] },
+        { id: 'ap2', learnerId: 'l1', teacherId: 't1', type: 'Good', category: 'Kindness', note: 'Helped a classmate', reflection: '', private: false, date: daysAgo(1), improvementRecorded: false, cancelled: false, parentComments: [] },
+        { id: 'ap3', learnerId: 'l2', teacherId: 't2', type: 'Growth', category: 'Responsibility', note: 'Forgot materials', reflection: 'What is your checklist?', private: false, date: daysAgo(10), improvementRecorded: true, cancelled: false, parentComments: [] }
+      ],
+      messages: [
+        { id: 'm1', learnerId: 'l1', fromRole: 'Teacher', text: 'Ava had a strong reading day today.', date: isoNow() },
+        { id: 'm2', learnerId: 'l1', fromRole: 'Parent', text: 'Thanks for the update! We practiced at home.', date: isoNow() }
+      ],
+      notifications: [
+        { id: 'n1', learnerId: 'l1', text: 'New Growth Apple added.', date: daysAgo(2) },
+        { id: 'n2', learnerId: 'l1', text: 'Teacher sent a message.', date: daysAgo(0) }
+      ]
+    };
+
+    function isoNow() { return new Date().toISOString(); }
+    function daysAgo(n) {
+      const d = new Date();
+      d.setDate(d.getDate() - n);
+      return d.toISOString();
+    }
+
+    function load() {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) {
+        localStorage.setItem(KEY, JSON.stringify(seed));
+        return structuredClone(seed);
+      }
+      return JSON.parse(raw);
+    }
+
+    function save(data) { localStorage.setItem(KEY, JSON.stringify(data)); }
+
+    let db = load();
+    let role = 'Teacher';
+    const parentLearnerId = db.users.parents[0].learnerId;
+
+    const $ = (id) => document.getElementById(id);
+
+    function learnerName(id) {
+      return db.users.learners.find(l => l.id === id)?.name || id;
+    }
+
+    function teacherName(id) {
+      return db.users.teachers.find(t => t.id === id)?.name || id;
+    }
+
+    function isSameDay(a, b) {
+      const da = new Date(a), dbd = new Date(b);
+      return da.getFullYear()===dbd.getFullYear() && da.getMonth()===dbd.getMonth() && da.getDate()===dbd.getDate();
+    }
+
+    function dateFmt(iso) {
+      return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    function applyCancellationRules(learnerId) {
+      const apples = db.apples
+        .filter(a => a.learnerId === learnerId)
+        .sort((a,b) => new Date(a.date) - new Date(b.date));
+      let goodCredits = 0;
+      apples.forEach(a => { if (a.type === 'Growth') a.cancelled = false; });
+      for (const a of apples) {
+        if (a.type === 'Good') goodCredits += 1;
+        if (a.type === 'Growth' && goodCredits >= 2) {
+          a.cancelled = true;
+          goodCredits -= 2;
+        }
+      }
+    }
+
+    function growthExpired(a) {
+      if (a.type !== 'Growth' || !a.improvementRecorded) return false;
+      const days = (Date.now() - new Date(a.date).getTime()) / (1000*60*60*24);
+      return days >= 14;
+    }
+
+    function weeklyStats(learnerId) {
+      const cutoff = Date.now() - 7*24*3600*1000;
+      const week = db.apples.filter(a => a.learnerId===learnerId && new Date(a.date).getTime() >= cutoff);
+      const good = week.filter(a => a.type==='Good').length;
+      const growthActive = week.filter(a => a.type==='Growth' && !a.cancelled && !growthExpired(a)).length;
+      return { good, growthActive, total: week.length };
+    }
+
+    function addNotification(learnerId, text) {
+      db.notifications.unshift({ id: crypto.randomUUID(), learnerId, text, date: isoNow() });
+      db.notifications = db.notifications.slice(0, 30);
+    }
+
+    function renderStatus() {
+      const text = role === 'Teacher' ?
+        'Teacher demo: award apples, view recent records, and message parent.' :
+        role === 'Parent' ?
+        `Parent demo: viewing dashboard for ${learnerName(parentLearnerId)}.` :
+        'Admin demo: manage value rules, export CSV, or reset demo.';
+      $('status').innerHTML = `<strong>${text}</strong>`;
+    }
+
+    function renderCommonFormOptions() {
+      $('learnerSelect').innerHTML = db.users.learners.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+      $('category').innerHTML = db.rules.values.map(v => `<option>${v}</option>`).join('');
+    }
+
+    function renderTeacher() {
+      const recent = [...db.apples].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,12);
+      $('teacherApples').innerHTML = recent.map(a => {
+        const expired = growthExpired(a);
+        return `<div class="row">
+          <div>
+            <div><span class="pill ${a.type==='Good'?'good':'growth'}">${a.type}</span> <strong>${learnerName(a.learnerId)}</strong> • ${a.category}</div>
+            <div class="muted">${dateFmt(a.date)} • ${teacherName(a.teacherId)} ${a.private ? '• Private' : ''}</div>
+            ${a.note ? `<div>${a.note}</div>` : ''}
+            ${a.cancelled ? `<div class="muted">Cancelled by Good Apples.</div>` : ''}
+            ${expired ? `<div class="muted">Expired after improvement (14+ days).</div>` : ''}
+          </div>
+        </div>`;
+      }).join('') || '<p class="muted">No apples yet.</p>';
+
+      renderMessages('teacherMessages', 'Teacher');
+    }
+
+    function renderParent() {
+      const stats = weeklyStats(parentLearnerId);
+      $('weeklySummary').innerHTML = `
+        <div class="pill good">Good: ${stats.good}</div>
+        <div class="pill growth">Active Growth: ${stats.growthActive}</div>
+        <div class="pill">Total this week: ${stats.total}</div>`;
+
+      const mine = db.apples.filter(a => a.learnerId===parentLearnerId)
+        .sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+      $('parentApples').innerHTML = mine.map(a => {
+        const comments = (a.parentComments || []).map(c => `<div class="muted">Parent: ${c.text} (${dateFmt(c.date)})</div>`).join('');
+        const commentBox = a.type==='Growth' ? `
+          <form data-apple="${a.id}" class="parentCommentForm form-grid" style="margin-top:6px;">
+            <input required name="comment" placeholder="Private comment to teacher" />
+            <button type="submit">Add private comment</button>
+          </form>` : '';
+        return `<div class="row">
+          <div>
+            <div><span class="pill ${a.type==='Good'?'good':'growth'}">${a.type}</span> ${a.category}</div>
+            <div class="muted">${dateFmt(a.date)} ${a.private ? '• Private' : ''} ${a.cancelled ? '• Cancelled' : ''}</div>
+            ${a.reflection ? `<div class="muted">Prompt: ${a.reflection}</div>` : ''}
+            ${comments}
+            ${commentBox}
+          </div>
+        </div>`;
+      }).join('') || '<p class="muted">No records yet.</p>';
+
+      document.querySelectorAll('.parentCommentForm').forEach(f => {
+        f.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const apple = db.apples.find(x => x.id === f.dataset.apple);
+          if (!apple) return;
+          const text = f.comment.value.trim();
+          if (!text) return;
+          apple.parentComments = apple.parentComments || [];
+          apple.parentComments.push({ text, date: isoNow(), private: true });
+          addNotification(parentLearnerId, 'Parent added a private comment on a Growth Apple.');
+          save(db); render();
+        });
+      });
+
+      $('notifications').innerHTML = db.notifications
+        .filter(n => n.learnerId===parentLearnerId)
+        .slice(0,10)
+        .map(n => `<div class="row"><div>${n.text}<div class="muted">${dateFmt(n.date)}</div></div></div>`)
+        .join('') || '<p class="muted">No notifications.</p>';
+
+      renderMessages('parentMessages', 'Parent');
+      renderTrendChart(parentLearnerId);
+    }
+
+    function renderTrendChart(learnerId) {
+      const points = [];
+      for (let i=6; i>=0; i--) {
+        const d = new Date(); d.setDate(d.getDate()-i);
+        const day = db.apples.filter(a => a.learnerId===learnerId && isSameDay(a.date,d.toISOString()));
+        const score = day.filter(a=>a.type==='Good').length - day.filter(a=>a.type==='Growth' && !a.cancelled).length;
+        points.push({ label: d.getDate(), score });
+      }
+      const width = 620, height = 180, pad = 20;
+      const min = Math.min(-2, ...points.map(p=>p.score));
+      const max = Math.max(2, ...points.map(p=>p.score));
+      const xStep = (width - pad*2)/(points.length-1);
+      const yMap = (v) => height - pad - ((v-min)/(max-min || 1))*(height-pad*2);
+      const poly = points.map((p,i)=>`${pad+i*xStep},${yMap(p.score)}`).join(' ');
+      const zeroY = yMap(0);
+      const dots = points.map((p,i)=>`<circle cx="${pad+i*xStep}" cy="${yMap(p.score)}" r="3" fill="#111" />`).join('');
+      const labels = points.map((p,i)=>`<text x="${pad+i*xStep}" y="${height-4}" font-size="10" text-anchor="middle" fill="#777">${p.label}</text>`).join('');
+      $('trendChart').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Trend chart">
+        <line x1="${pad}" y1="${zeroY}" x2="${width-pad}" y2="${zeroY}" stroke="#ccc" />
+        <polyline fill="none" stroke="#111" stroke-width="2" points="${poly}" />
+        ${dots}${labels}
+      </svg>`;
+    }
+
+    function renderAdmin() {
+      $('valuesList').innerHTML = db.rules.values.map((v,i) => `
+        <div class="row"><div>${v}</div><button data-remove-value="${i}">Remove</button></div>
+      `).join('');
+      document.querySelectorAll('[data-remove-value]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          db.rules.values.splice(Number(btn.dataset.removeValue),1);
+          if (!db.rules.values.length) db.rules.values = ['Respect'];
+          save(db); render();
+        });
+      });
+    }
+
+    function renderMessages(targetId, meRole) {
+      const thread = db.messages.filter(m => m.learnerId===parentLearnerId).slice(-30);
+      $(targetId).innerHTML = thread.map(m => `
+        <div class="bubble ${m.fromRole===meRole?'me':''}">
+          <div>${m.text}</div>
+          <div class="muted">${m.fromRole} • ${dateFmt(m.date)}</div>
+        </div>`).join('') || '<p class="muted">No messages yet.</p>';
+      $(targetId).scrollTop = $(targetId).scrollHeight;
+    }
+
+    function exportCsv() {
+      const rows = [['Learner','GoodTotal','GrowthActive','GrowthCancelled']];
+      db.users.learners.forEach(l => {
+        const apples = db.apples.filter(a=>a.learnerId===l.id);
+        rows.push([
+          l.name,
+          apples.filter(a=>a.type==='Good').length,
+          apples.filter(a=>a.type==='Growth' && !a.cancelled && !growthExpired(a)).length,
+          apples.filter(a=>a.type==='Growth' && a.cancelled).length
+        ]);
+      });
+      const csv = rows.map(r => r.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'appletree-report.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function renderRoleVisibility() {
+      $('teacherView').classList.toggle('hidden', role !== 'Teacher');
+      $('parentView').classList.toggle('hidden', role !== 'Parent');
+      $('adminView').classList.toggle('hidden', role !== 'Admin');
+    }
+
+    function render() {
+      renderCommonFormOptions();
+      renderRoleVisibility();
+      renderStatus();
+      if (role === 'Teacher') renderTeacher();
+      if (role === 'Parent') renderParent();
+      if (role === 'Admin') renderAdmin();
+    }
+
+    $('role').addEventListener('change', (e) => { role = e.target.value; render(); });
+
+    $('awardForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const learnerId = $('learnerSelect').value;
+      const type = $('appleType').value;
+      const todayGrowthForLearner = db.apples.filter(a => a.learnerId===learnerId && a.type==='Growth' && isSameDay(a.date, isoNow())).length;
+      if (type==='Growth' && todayGrowthForLearner >= 2) {
+        alert('Growth Apple limit reached for this learner today (max 2).');
+        return;
+      }
+      const apple = {
+        id: crypto.randomUUID(),
+        learnerId,
+        teacherId: db.users.teachers[0].id,
+        type,
+        category: $('category').value,
+        note: $('note').value.trim(),
+        reflection: $('reflection').value.trim(),
+        private: $('privateFlag').checked,
+        date: isoNow(),
+        improvementRecorded: type==='Growth',
+        cancelled: false,
+        parentComments: []
+      };
+      db.apples.push(apple);
+      applyCancellationRules(learnerId);
+      addNotification(learnerId, `${type} Apple added for ${learnerName(learnerId)}.`);
+      save(db);
+      e.target.reset();
+      render();
+    });
+
+    $('teacherMsgForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = $('teacherMsgInput').value.trim();
+      if (!text) return;
+      db.messages.push({ id: crypto.randomUUID(), learnerId: parentLearnerId, fromRole: 'Teacher', text, date: isoNow() });
+      addNotification(parentLearnerId, 'New message from teacher.');
+      save(db); e.target.reset(); render();
+    });
+
+    $('parentMsgForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = $('parentMsgInput').value.trim();
+      if (!text) return;
+      db.messages.push({ id: crypto.randomUUID(), learnerId: parentLearnerId, fromRole: 'Parent', text, date: isoNow() });
+      addNotification(parentLearnerId, 'Parent replied in message thread.');
+      save(db); e.target.reset(); render();
+    });
+
+    $('addValueForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = $('newValue').value.trim();
+      if (!v) return;
+      db.rules.values.push(v);
+      save(db);
+      e.target.reset();
+      render();
+    });
+
+    $('exportCsv').addEventListener('click', exportCsv);
+    $('resetDemo').addEventListener('click', () => {
+      if (!confirm('Reset demo data to defaults?')) return;
+      db = structuredClone(seed);
+      save(db);
+      render();
+    });
+
+    // Initial business-rule pass and first render
+    db.users.learners.forEach(l => applyCancellationRules(l.id));
+    save(db);
+    render();
+  </script>
+</body>
+</html>
